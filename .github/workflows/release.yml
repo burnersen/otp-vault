@@ -1,0 +1,143 @@
+# otp-vault (https://github.com/burnersen/otp-vault)
+# Copyright (C) 2026 burnersen
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Builds and publishes a release. Two ways to start it:
+#
+#   git tag v1.2.0 && git push origin v1.2.0
+#   Actions > Release > Run workflow, enter 1.2.0 (on main; the release
+#   then creates the tag itself, on the commit that was built)
+#
+# The tag is the only place the version lives: it goes into the program with
+# -ldflags and into the file properties through wails.json. The text of the
+# release is .github/release-notes/<version>.md; without it nothing is built.
+#
+# Published only when every step passed. A version with a suffix (1.2.0-rc1)
+# becomes a pre-release. Asset names stay the same for every version, so
+# .../releases/latest/download/otp-vault.exe always points at the newest.
+# Running it again for the same version replaces a leftover draft; a
+# published release is refused (raise the version instead).
+#
+# Dry run: tick "dry run" when starting it by hand. Everything is built and
+# checked, the files stay on the run page for two weeks, nothing is
+# published. Pull requests that change this workflow get a dry run by
+# themselves.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without "v", e.g. 1.2.0'
+        required: true
+      dry_run:
+        description: 'Dry run: build and check only, publish nothing'
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+
+permissions:
+  contents: write
+
+env:
+  DRY_RUN: ${{ github.event_name == 'pull_request' || inputs.dry_run == true }}
+
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('release-dry-{0}', github.ref) || 'release' }}
+
+jobs:
+  release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: version
+        # Inputs go through the environment, never pasted into the script.
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          v="$INPUT_VERSION"
+          if [ -z "$v" ] && [ "$GITHUB_EVENT_NAME" = pull_request ]; then v="0.0.0-dryrun"; fi
+          [ -n "$v" ] || v="${GITHUB_REF_NAME#v}"
+          if ! [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::not a version: $v (expected 1.2.3 or 1.2.3-rc1)"; exit 1
+          fi
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$DRY_RUN" != true ] && [ "$GITHUB_REF_NAME" != main ]; then
+            echo "::error::a release is made from main only, not from $GITHUB_REF_NAME"; exit 1
+          fi
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          echo "NUMERIC=${v%%-*}" >> "$GITHUB_ENV"
+
+      - name: release notes
+        run: |
+          notes=".github/release-notes/$VERSION.md"
+          if [ "$DRY_RUN" = true ] && [ ! -f "$notes" ]; then
+            echo "Dry run of $VERSION." > "$RUNNER_TEMP/notes.md"
+          elif [ ! -f "$notes" ]; then
+            echo "::error::$notes is missing. Write what changed for users, then tag again."; exit 1
+          else
+            cp "$notes" "$RUNNER_TEMP/notes.md"
+          fi
+
+      - name: tests
+        run: |
+          go test -count=1 ./...
+          for c in frontend/*_check.js; do node "$c"; done
+
+      - name: build
+        run: |
+          set -euo pipefail
+          go install github.com/wailsapp/wails/v2/cmd/wails@v2.17.1
+          # File properties (right-click > Properties > Details) carry 1.2.3.
+          sed -i -E "s/\"productVersion\": \"[^\"]*\"/\"productVersion\": \"$NUMERIC\"/" wails.json
+          ldflags="-s -w -X main.version=$VERSION"
+          mkdir -p dist
+          wails build -platform windows/amd64 -skipbindings -trimpath -ldflags "$ldflags" -o otp-vault-amd64.exe
+          wails build -platform windows/arm64 -skipbindings -trimpath -ldflags "$ldflags" -o otp-vault-arm64.exe
+          cp build/bin/otp-vault-amd64.exe dist/otp-vault.exe
+          cp build/bin/otp-vault-arm64.exe dist/otp-vault-arm64.exe
+          (cd dist && sha256sum -- * > SHA256SUMS.txt)
+          cat dist/SHA256SUMS.txt
+
+      - name: keep the files of a dry run
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: otp-vault-${{ env.VERSION }}-dry-run
+          path: dist/
+          retention-days: 14
+
+      - name: publish
+        if: env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="v$VERSION"
+          # A leftover draft of this version is replaced: a run that failed
+          # half way, or a tag that was deleted and set again (GitHub then turns
+          # its release into a draft that only the owner sees). A published
+          # release is never touched.
+          if draft=$(gh release view "$tag" --json isDraft --jq .isDraft 2>/dev/null); then
+            if [ "$draft" != true ]; then
+              echo "::error::release $tag is published already: raise the version first"; exit 1
+            fi
+            echo "Replacing the draft of $tag."
+            gh release delete "$tag" --yes
+          fi
+          extra=()
+          [[ "$VERSION" == *-* ]] && extra+=(--prerelease)
+          gh release create "$tag" dist/* --target "$GITHUB_SHA" \
+            --title "otp-vault $VERSION" --notes-file "$RUNNER_TEMP/notes.md" "${extra[@]}"

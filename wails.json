@@ -1,0 +1,17 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "otp-vault",
+  "outputfilename": "otp-vault",
+  "frontend:install": "",
+  "frontend:build": "",
+  "author": {
+    "name": "burnersen"
+  },
+  "info": {
+    "companyName": "burnersen",
+    "productName": "otp-vault",
+    "productVersion": "0.0.0",
+    "copyright": "Copyright (C) 2026 burnersen, GPL-3.0-only",
+    "comments": "Two-factor codes (TOTP, HOTP, Steam) in an encrypted vault, with tray, import, export and printed recovery sheets"
+  }
+}
