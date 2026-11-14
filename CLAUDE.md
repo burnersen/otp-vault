@@ -27,6 +27,7 @@ gofmt -l .                      # must stay empty
 GOOS=windows go vet ./...
 go test -race -count=1 ./...
 node frontend/app_check.js      # check the page without a browser
+bash .github/check-release-notes.sh   # the next version has its release notes
 wails build -platform windows/amd64 -skipbindings -trimpath   # Windows only
 ```
 

@@ -57,6 +57,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # the tags, to name them when the notes are missing
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
@@ -87,7 +89,11 @@ jobs:
           if [ "$DRY_RUN" = true ] && [ ! -f "$notes" ]; then
             echo "Dry run of $VERSION." > "$RUNNER_TEMP/notes.md"
           elif [ ! -f "$notes" ]; then
-            echo "::error::$notes is missing. Write what changed for users, then tag again."; exit 1
+            echo "::error::$notes is missing. Write what changed for users, then start the release again."
+            echo "Notes that exist: $(ls .github/release-notes | tr '\n' ' ')"
+            echo "Released already: $(git tag --list 'v[0-9]*' --sort=-v:refname | tr '\n' ' ')"
+            echo "Started with another version than the notes? Rename the file or start with that version."
+            exit 1
           else
             cp "$notes" "$RUNNER_TEMP/notes.md"
           fi
