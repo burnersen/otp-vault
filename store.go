@@ -117,7 +117,9 @@ func (s *store) changePassword(oldPw, newPw string) error {
 	}
 	s.key.wipe()
 	s.key = k
-	return nil
+	// The .bak written a moment ago is still sealed with the old password.
+	// Someone who knows that password must not find the accounts there.
+	return refreshBackup(s.path)
 }
 
 func (s *store) saveWith(k sealKey) error {

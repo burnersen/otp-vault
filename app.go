@@ -48,10 +48,15 @@ type App struct {
 	pending      []Entry // import waiting for the user's choice
 	pendingFmt   string
 	clipTimer    *time.Timer
+	clipClear    func() // empties the clipboard if it still holds what was copied
 	hidden       bool
 	quitting     bool
 	selfTest     bool
 	now          func() time.Time
+
+	// The private clipboard of Windows; tests replace both.
+	clipSet   func(text string) (uint32, error)
+	clipClean func(seq uint32)
 
 	// emit sends an event to the page; tests replace it.
 	emit func(name string, data ...any)
@@ -64,6 +69,9 @@ func NewApp(paths appPaths, logger *slog.Logger) *App {
 		store:  newStore(filepath.Join(paths.DataDir, vaultFileName)),
 		icons:  newIconFetcher(),
 		now:    time.Now,
+
+		clipSet:   setClipboardSecret,
+		clipClean: clearClipboardIf,
 	}
 	a.settings, a.warning = loadSettings(filepath.Join(paths.DataDir, settingsName))
 	if a.warning != "" {
@@ -101,6 +109,7 @@ func (a *App) beforeClose(ctx context.Context) bool {
 }
 
 func (a *App) shutdown(context.Context) {
+	a.clearClipboardNow()
 	a.store.lock()
 	stopTray()
 }
@@ -530,33 +539,11 @@ func (a *App) Copy(id string, next bool) (string, error) {
 	if next {
 		code = v.Next
 	}
-	seq, nerr := setClipboardSecret(code)
-	native := nerr == nil
-	if !native {
-		if a.ctx == nil {
-			return "", a.uiError(userError(nerr, "The clipboard is not available", "Try again."))
-		}
-		if err := wailsruntime.ClipboardSetText(a.ctx, code); err != nil {
-			return "", a.uiError(userError(err, "The code could not be copied", "Try again."))
-		}
+	if err := a.toClipboard(code); err != nil {
+		return "", a.uiError(err)
 	}
 	a.mu.Lock()
-	secs := a.settings.ClipboardSeconds
 	hide := a.settings.HideAfterCopy
-	if a.clipTimer != nil {
-		a.clipTimer.Stop()
-	}
-	if secs > 0 {
-		a.clipTimer = time.AfterFunc(time.Duration(secs)*time.Second, func() {
-			if native {
-				clearClipboardIf(seq)
-			} else if a.ctx != nil {
-				if cur, err := wailsruntime.ClipboardGetText(a.ctx); err == nil && cur == code {
-					wailsruntime.ClipboardSetText(a.ctx, "") // best effort
-				}
-			}
-		})
-	}
 	a.mu.Unlock()
 	if hide {
 		go func() {
@@ -565,6 +552,75 @@ func (a *App) Copy(id string, next bool) (string, error) {
 		}()
 	}
 	return code, nil
+}
+
+// CopySecret puts the secret of an entry (or its otpauth link) on the
+// clipboard, the same private way as a code: kept out of the Windows
+// clipboard history and cleared after the time from the settings. The page
+// never copies a secret itself.
+func (a *App) CopySecret(id string, link bool) error {
+	a.Touch()
+	e, err := a.store.get(id)
+	if err != nil {
+		return a.uiError(err)
+	}
+	text := e.Secret
+	if link {
+		text = buildOTPAuth(e)
+	}
+	if err := a.toClipboard(text); err != nil {
+		return a.uiError(err)
+	}
+	return nil
+}
+
+// toClipboard copies text as private content and plans the clearing.
+func (a *App) toClipboard(text string) error {
+	seq, nerr := a.clipSet(text)
+	native := nerr == nil
+	if !native {
+		if a.ctx == nil {
+			return userError(nerr, "The clipboard is not available", "Try again.")
+		}
+		if err := wailsruntime.ClipboardSetText(a.ctx, text); err != nil {
+			return userError(err, "The code could not be copied", "Try again.")
+		}
+	}
+	clear := func() {
+		if native {
+			a.clipClean(seq)
+		} else if a.ctx != nil {
+			if cur, err := wailsruntime.ClipboardGetText(a.ctx); err == nil && cur == text {
+				wailsruntime.ClipboardSetText(a.ctx, "") // best effort
+			}
+		}
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.clipTimer != nil {
+		a.clipTimer.Stop()
+	}
+	a.clipTimer, a.clipClear = nil, nil
+	if secs := a.settings.ClipboardSeconds; secs > 0 {
+		a.clipClear = clear
+		a.clipTimer = time.AfterFunc(time.Duration(secs)*time.Second, a.clearClipboardNow)
+	}
+	return nil
+}
+
+// clearClipboardNow runs a planned clearing at once: at the end of the
+// program the timer would never fire and the code would stay behind.
+func (a *App) clearClipboardNow() {
+	a.mu.Lock()
+	clear := a.clipClear
+	if a.clipTimer != nil {
+		a.clipTimer.Stop()
+	}
+	a.clipTimer, a.clipClear = nil, nil
+	a.mu.Unlock()
+	if clear != nil {
+		clear()
+	}
 }
 
 // ---- icons ----------------------------------------------------------------

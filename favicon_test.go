@@ -62,3 +62,17 @@ func (r rewriteTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	req.URL.Host = r.to.Host
 	return r.base.RoundTrip(req)
 }
+
+func TestRedirectToPlainHTTPRefused(t *testing.T) {
+	plain, _ := http.NewRequest(http.MethodGet, "http://example.com/favicon.ico", nil)
+	if err := httpsRedirectsOnly(plain, nil); err == nil {
+		t.Fatal("redirect to http accepted")
+	}
+	safe, _ := http.NewRequest(http.MethodGet, "https://example.com/favicon.ico", nil)
+	if err := httpsRedirectsOnly(safe, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := httpsRedirectsOnly(safe, make([]*http.Request, 5)); err == nil {
+		t.Fatal("endless redirects accepted")
+	}
+}

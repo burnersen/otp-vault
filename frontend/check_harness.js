@@ -15,9 +15,10 @@ const vm = require("vm");
 const dist = path.join(__dirname, "dist");
 const repo = path.join(__dirname, "..");
 
-function loadPage() {
-  const document = { addEventListener() {} };
-  const context = vm.createContext({ document, console });
+// extra: more globals for the page (timers, a stand-in for Go).
+function loadPage(extra) {
+  const document = { addEventListener() {}, querySelectorAll() { return []; } };
+  const context = vm.createContext(Object.assign({ document, console }, extra || {}));
   context.window = context;
   for (const file of ["i18n.js", "app.js"]) {
     vm.runInContext(fs.readFileSync(path.join(dist, file), "utf8"), context, { filename: file });

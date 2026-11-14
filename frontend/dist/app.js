@@ -187,9 +187,28 @@
     if (first) setTimeout(() => first.focus(), 30);
   }
 
+  // wipeDialogs removes what a closed dialog must not keep: secret, link and
+  // QR codes of the details and the Google export, typed passwords. With
+  // all (at lock) the texts of add and import go too.
+  function wipeDialogs(all) {
+    el("details-secret").textContent = "";
+    el("details-uri").textContent = "";
+    el("details-qr").removeAttribute("src");
+    el("google-qr").removeAttribute("src");
+    state.googleQRs = [];
+    for (const id of ["entry-secret", "export-pw", "export-pw2", "import-pw", "pw-old", "pw-new", "pw-new2"]) el(id).value = "";
+    if (all) {
+      el("import-text").value = "";
+      el("import-list").textContent = "";
+      state.importText = "";
+      state.editing = null;
+    }
+  }
+
   function closeDialog() {
     el("overlay").hidden = true;
     DIALOGS.forEach((d) => { el(d).hidden = true; });
+    wipeDialogs(false);
     if (state.preview) {
       state.preview = null;
       call("CancelImport").catch(() => {});
@@ -276,7 +295,6 @@
     el("lock-view").hidden = true;
     el("main-view").hidden = false;
     await loadEntries();
-    startTicker();
     el("search").focus();
   }
 
@@ -287,6 +305,7 @@
     clearTimeout(state.tickTimer);
     el("cards").textContent = "";
     closeDialog();
+    wipeDialogs(true);
     closeMenu();
     showLock();
     setTimeout(() => el("lock-pw").focus(), 30);
@@ -295,7 +314,7 @@
   async function loadEntries() {
     state.entries = await call("List");
     render();
-    await tick(true);
+    await tick();
   }
 
   function render() {
@@ -439,7 +458,10 @@
     });
   }
 
-  async function tick(once) {
+  // tick fetches the codes and always plans the next round itself. It may be
+  // called at any time (after adding an entry, when the window is shown):
+  // the timer is replaced, never left stopped.
+  async function tick() {
     clearTimeout(state.tickTimer);
     if (!state.unlocked) return;
     try {
@@ -448,9 +470,14 @@
       for (const c of codes) state.codes[c.id] = c;
       updateCodes();
     } catch (err) {
-      return; // locked meanwhile: the "locked" event shows the lock screen
+      // Locked meanwhile and the "locked" event was missed: show the lock
+      // screen. Anything else was a hiccup, the next round tries again.
+      try {
+        const st = await call("State");
+        if (!st.unlocked && state.unlocked) { onLocked(); return; }
+      } catch (err2) { /* next round */ }
     }
-    if (once !== true) startTicker();
+    if (state.unlocked) startTicker();
   }
 
   function startTicker() {
@@ -484,7 +511,7 @@
       await call("NextHOTP", id);
       state.entries = await call("List");
       render();
-      await tick(true);
+      await tick();
     } catch (err) { showError(err); }
   }
 
@@ -663,15 +690,22 @@
       el("entry-error").textContent = t("entry.needName");
       return;
     }
+    const btn = el("entry-save");
+    if (btn.disabled) return; // a second Enter while the first is being saved
+    btn.disabled = true;
+    const editing = !!state.editing;
     try {
-      const v = await call(state.editing ? "UpdateEntry" : "AddEntry", input);
+      const v = await call(editing ? "UpdateEntry" : "AddEntry", input);
       closeDialog();
+      toast(editing ? t("toast.saved") : t("toast.added", { name: displayName(v) }));
       state.entries = await call("List");
       render();
-      await tick(true);
-      toast(state.editing ? t("toast.saved") : t("toast.added", { name: displayName(v) }));
+      await tick();
     } catch (err) {
-      setInlineError("entry-error", err);
+      if (el("dlg-entry").hidden) showError(err); // saved, but the list did not refresh
+      else setInlineError("entry-error", err);
+    } finally {
+      btn.disabled = false;
     }
   }
 
@@ -855,16 +889,22 @@
         return;
       }
     }
+    const btn = el("import-commit");
+    if (btn.disabled) return;
+    btn.disabled = true;
     try {
       const r = await call("CommitImport", choices);
       state.preview = null;
       closeDialog();
+      toast(t("toast.imported", { n: r.added, s: r.skipped }));
       state.entries = await call("List");
       render();
-      await tick(true);
-      toast(t("toast.imported", { n: r.added, s: r.skipped }));
+      await tick();
     } catch (err) {
-      setInlineError("import-commit-error", err);
+      if (el("dlg-import").hidden) showError(err);
+      else setInlineError("import-commit-error", err);
+    } finally {
+      btn.disabled = false;
     }
   }
 
@@ -876,16 +916,18 @@
     el("details-qr").src = d.qr;
     el("details-secret").textContent = d.secret.replace(/(.{4})/g, "$1 ").trim();
     el("details-uri").textContent = d.uri;
-    el("details-copy-secret").onclick = () => copyText(d.secret);
-    el("details-copy-uri").onclick = () => copyText(d.uri);
+    el("details-copy-secret").onclick = () => copySecret(e.id, false);
+    el("details-copy-uri").onclick = () => copySecret(e.id, true);
     openDialog("dlg-details");
   }
 
-  async function copyText(text) {
+  // Go copies the secret, the same private way as a code (no clipboard
+  // history, cleared after the time from the settings).
+  async function copySecret(id, link) {
     try {
-      if (root.runtime && root.runtime.ClipboardSetText) await root.runtime.ClipboardSetText(text);
-      else await navigator.clipboard.writeText(text);
-      toast(t("details.copied"));
+      await call("CopySecret", id, link);
+      const secs = state.settings ? state.settings.clipboardSeconds : 0;
+      toast(secs > 0 ? t("toast.copiedClear", { s: secs }) : t("details.copied"));
     } catch (err) { showError(err); }
   }
 
@@ -1224,6 +1266,6 @@
     }
   }
 
-  root.OTPV = { t, errText, translateLine, groupCode, ringOffset, strength, matches, hue, TEXTS, state };
+  root.OTPV = { t, errText, translateLine, groupCode, ringOffset, strength, matches, hue, TEXTS, state, tick };
   if (document && document.addEventListener) document.addEventListener("DOMContentLoaded", start);
 })(window);
