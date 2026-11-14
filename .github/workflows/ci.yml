@@ -21,12 +21,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # tags and history for the release notes check
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - uses: actions/setup-node@v7
         with:
           node-version: '22'
+
+      # The release stops without .github/release-notes/<version>.md. Found
+      # here on every push, not only when the release is started.
+      - name: release notes for the next version
+        run: bash .github/check-release-notes.sh
 
       # gofmt -l only lists offenders and exits 0; turning its output into
       # the verdict is the point of this step.
