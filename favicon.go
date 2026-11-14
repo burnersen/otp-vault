@@ -37,10 +37,22 @@ type iconFetcher struct {
 
 func newIconFetcher() *iconFetcher {
 	return &iconFetcher{
-		client: &http.Client{Timeout: iconTimeout},
+		client: &http.Client{Timeout: iconTimeout, CheckRedirect: httpsRedirectsOnly},
 		scheme: "https",
 		agent:  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) otp-vault/" + version,
 	}
+}
+
+// httpsRedirectsOnly stops a website from sending the request on to an
+// unencrypted address, where anyone on the way could swap the icon.
+func httpsRedirectsOnly(req *http.Request, via []*http.Request) error {
+	if req.URL.Scheme != "https" {
+		return errors.New("redirect to an unencrypted address refused: " + req.URL.Host)
+	}
+	if len(via) >= 5 {
+		return errors.New("too many redirects")
+	}
+	return nil
 }
 
 var (

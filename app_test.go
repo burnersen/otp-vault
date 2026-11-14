@@ -7,6 +7,7 @@ package main
 import (
 	"errors"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -174,5 +175,91 @@ func TestSettings(t *testing.T) {
 	}
 	if s, warn := loadSettings(filepath.Join(a.paths.DataDir, settingsName)); warn == "" || s != defaultSettings() {
 		t.Fatalf("%+v %q", s, warn)
+	}
+}
+
+// A secret copied from the details goes through the private clipboard and
+// is cleared when the program ends, not left behind.
+func TestCopySecretUsesPrivateClipboard(t *testing.T) {
+	a := testApp(t)
+	var clip string
+	a.clipSet = func(s string) (uint32, error) { clip = s; return 7, nil }
+	a.clipClean = func(seq uint32) {
+		if seq == 7 {
+			clip = ""
+		}
+	}
+	if err := a.Create("long enough password"); err != nil {
+		t.Fatal(err)
+	}
+	v, err := a.AddEntry(EntryInput{Secret: "JBSWY3DPEHPK3PXP", Issuer: "GitHub"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := a.CopySecret(v.ID, false); err != nil || clip != "JBSWY3DPEHPK3PXP" {
+		t.Fatalf("%q %v", clip, err)
+	}
+	if err := a.CopySecret(v.ID, true); err != nil || !strings.HasPrefix(clip, "otpauth://totp/") {
+		t.Fatalf("%q %v", clip, err)
+	}
+	if code, err := a.Copy(v.ID, false); err != nil || clip != code || len(code) != 6 {
+		t.Fatalf("%q %q %v", clip, code, err)
+	}
+	a.shutdown(nil)
+	if clip != "" {
+		t.Fatalf("clipboard still holds %q after the end", clip)
+	}
+	// "never clear" in the settings: nothing is planned, nothing is cleared.
+	if err := a.Unlock("long enough password"); err != nil {
+		t.Fatal(err)
+	}
+	a.settings.ClipboardSeconds = 0
+	if _, err := a.Copy(v.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	a.clearClipboardNow()
+	if clip == "" {
+		t.Fatal("cleared although the setting says never")
+	}
+	a.Lock()
+	if err := a.CopySecret(v.ID, false); err == nil {
+		t.Fatal("secret copied while locked")
+	}
+}
+
+// After a password change no file opens with the old password any more,
+// not even the .bak of the save before.
+func TestChangePasswordReplacesBackup(t *testing.T) {
+	a := testApp(t)
+	if err := a.Create("the old password"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.AddEntry(EntryInput{Secret: "JBSWY3DPEHPK3PXP", Issuer: "GitHub"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.ChangePassword("the old password", "the new password"); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{vaultFileName, vaultFileName + ".bak"} {
+		raw, err := os.ReadFile(filepath.Join(a.paths.DataDir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, _, err := open(raw, "the old password"); err == nil {
+			t.Fatalf("%s still opens with the old password", name)
+		}
+		v, k, err := open(raw, "the new password")
+		if err != nil || len(v.Entries) != 1 {
+			t.Fatalf("%s: %+v %v", name, v, err)
+		}
+		k.wipe()
+	}
+}
+
+// A file from somewhere else cannot ask for gigabytes of memory.
+func TestKDFMemoryLimit(t *testing.T) {
+	p := kdfParams{Name: kdfName, Time: 1, Memory: maxKDFMemory + 1, Threads: 1, Salt: "AAAAAAAAAAAAAAAAAAAAAA=="}
+	if _, err := deriveKey("whatever password", p); err == nil {
+		t.Fatal("too much memory accepted")
 	}
 }

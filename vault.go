@@ -33,6 +33,9 @@ const (
 	cipherName   = "xchacha20poly1305"
 	kdfName      = "argon2id"
 	minPassword  = 8
+	// maxKDFMemory (KiB): a file from somewhere else must not make the
+	// program ask Windows for many gigabytes just to try a password.
+	maxKDFMemory = 1024 * 1024
 )
 
 // kdfParams are stored in the file, so stronger defaults later still open
@@ -88,7 +91,7 @@ func newSealKey(password string) (sealKey, error) {
 }
 
 func deriveKey(password string, p kdfParams) (sealKey, error) {
-	if p.Name != kdfName || p.Time == 0 || p.Threads == 0 || p.Memory < 8*1024 || p.Memory > 4*1024*1024 || p.Time > 64 {
+	if p.Name != kdfName || p.Time == 0 || p.Threads == 0 || p.Memory < 8*1024 || p.Memory > maxKDFMemory || p.Time > 64 {
 		return sealKey{}, userError(nil, "The file uses key settings this version does not know", "Update otp-vault, or check that this is an otp-vault file.")
 	}
 	salt, err := base64.StdEncoding.DecodeString(p.Salt)
@@ -225,6 +228,25 @@ func saveVault(path string, k sealKey, v vaultData) error {
 	}
 	if err := writeFileAtomic(path, raw, 0o600); err != nil {
 		return fileError(err, "write", path)
+	}
+	return nil
+}
+
+// refreshBackup makes <name>.bak a copy of the vault as it is now. Used
+// after a password change, so no file sealed with the old password is left.
+// If the copy cannot be written, the old backup is removed instead.
+func refreshBackup(path string) error {
+	bak := path + ".bak"
+	cur, err := os.ReadFile(path)
+	if err == nil {
+		err = writeFileAtomic(bak, cur, 0o600)
+	}
+	if err == nil {
+		return nil
+	}
+	if rerr := os.Remove(bak); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+		return userError(errors.Join(err, rerr), "The password was changed, but the old backup file could not be replaced",
+			"Delete this file by hand, it still opens with the old password: "+bak)
 	}
 	return nil
 }

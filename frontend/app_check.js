@@ -103,4 +103,30 @@ const de = OTPV.TEXTS.de;
   check("avatar hue stable", OTPV.hue("github") === OTPV.hue("github") && OTPV.hue("a") !== OTPV.hue("b"));
 }
 
-done();
+// The codes keep ticking: after every fetch (also the extra one after adding
+// an entry) and after a failed fetch a new round is planned. Once the ticker
+// stayed stopped after "add", and the window stood still until a restart.
+(async () => {
+  let planned = 0, fail = false;
+  const App = {
+    Codes: async () => { if (fail) throw new Error("hiccup"); return [{ id: "a", current: "123456" }]; },
+    State: async () => ({ unlocked: true }),
+  };
+  const page = loadPage({
+    setTimeout: () => { planned++; return planned; },
+    clearTimeout: () => {},
+    go: { main: { App } },
+  });
+  page.state.unlocked = true;
+  await page.tick();
+  check("a fetch of the codes plans the next one", planned === 1 && page.state.codes.a.current === "123456", planned);
+  fail = true;
+  await page.tick();
+  check("a failed fetch plans the next one too", planned === 2, planned);
+  page.state.unlocked = false;
+  await page.tick();
+  check("no fetch while locked", planned === 2, planned);
+  check("no one-shot fetch that stops the ticker", !/tick\(true\)/.test(js));
+  check("the page never copies a secret itself", !/ClipboardSetText|navigator\.clipboard/.test(js));
+  done();
+})();

@@ -21,7 +21,7 @@ A window and a tray icon for all your TOTP codes: click a code and it is copied.
 ## ✨ What it does
 
 - **All codes at a glance**: big, readable codes with a countdown ring and the next code below. TOTP, HOTP and Steam; SHA1, SHA256, SHA512; 6, 7 or 8 digits; any period.
-- **Click to copy**: the clipboard is cleared again after 30 seconds, and Windows keeps the code out of the clipboard history (Win+V) and the cloud clipboard.
+- **Click to copy**: the clipboard is cleared again after 30 seconds, and Windows keeps the code out of the clipboard history (Win+V) and the cloud clipboard. The same goes for a secret or link copied from the details, and the clipboard is cleared when you quit.
 - **Import from almost anything**: a bare secret, `otpauth://` links (with or without issuer; missing names are asked for), Google Authenticator export QR codes, Aegis (plain and encrypted), 2FAS (plain and encrypted), andOTP, Bitwarden JSON and CSV, KeePassXC CSV, any CSV with a secret column, otp-vault backups. QR codes from image files or a pasted screenshot (Win+Shift+S, then Ctrl+V). Duplicates are recognised.
 - **Export in every direction**: encrypted backup (with the master password or its own), A4 recovery sheet (PDF) with QR code, service, user name and secret, QR codes for Google Authenticator, Aegis JSON, `otpauth://` links, CSV. Plain exports warn first.
 - **Icons**: on request, fetched from the service's own website and stored inside the vault. Or choose your own image.
@@ -32,7 +32,7 @@ A window and a tray icon for all your TOTP codes: click a code and it is copied.
 
 - The vault is one file, encrypted with **XChaCha20-Poly1305**; the key comes from your master password with **Argon2id** (64 MiB, 3 passes). Without the password nothing is readable, not even the names of the accounts.
 - **Auto lock** after 5 minutes without use (adjustable), when Windows is locked (Win+L), and optionally when the window goes to the tray.
-- Every change is saved at once; the previous file is kept as `vault.otpv.bak`.
+- Every change is saved at once; the previous file is kept as `vault.otpv.bak`. After a password change the backup is replaced too, so no file opens with the old password any more.
 - **No network**, except when you click "Fetch icons": then only the host name of the service is contacted, never a secret or a user name. No icon service in between.
 
 ## 📁 Where its files live
