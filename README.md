@@ -14,7 +14,9 @@
 [![License: GPLv3](https://img.shields.io/badge/License-GPLv3-blue)](#-license)
 [![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/burnersen)
 
-**[⬇️ Download the latest release](https://github.com/burnersen/otp-vault/releases/latest)** · **[☕ Buy me a coffee](https://ko-fi.com/burnersen)**
+**[⬇️ Download the latest release](https://github.com/burnersen/otp-vault/releases/latest)** · **[🌐 Website](https://tech.burnersen.de/en/tools/otp-vault-en/)** · **[☕ Buy me a coffee](https://ko-fi.com/burnersen)**
+
+<sub>🇩🇪 Auf Deutsch: [tech.burnersen.de/tools/otp-vault](https://tech.burnersen.de/tools/otp-vault/)</sub>
 
 <img src="docs/screenshot.png" alt="otp-vault with eight sample accounts: big codes with a countdown ring and the next code below each, search field and buttons for Add, Import, Export, icons, settings and lock" width="840">
 
