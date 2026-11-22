@@ -25,6 +25,8 @@
 //	favicon.go       icons from the service's own website, on request
 //	settings.go      the switches of the settings page (JSON)
 //	tray_windows.go  tray icon, menu, Windows lock, private clipboard
+//	supervisor_windows.go  restarts the window process after a crash
+//	window_state.go  remembered window size, restart rules
 //	internal/qr/     QR encoder (copy of rsc.io/qr, BSD)
 //	errors.go logging.go paths.go files.go   same as the kit templates
 //	frontend/        plain HTML, CSS and JavaScript, no npm, no build step
@@ -66,14 +68,27 @@ func main() {
 		showFatal("could not find its folders", err)
 		return
 	}
+	// A normal start becomes the watcher, which runs the window in a second
+	// process and starts it again if it dies (supervisor_windows.go).
+	if !selfTest && !isSupervised() {
+		if code, ok := supervise(paths, os.Args[1:]); ok {
+			os.Exit(code)
+		}
+	}
 	logger := slog.New(slog.DiscardHandler)
 	if l, closeLog, err := openLog(paths.LogFile, slog.LevelInfo); err == nil {
 		logger = l
 		defer closeLog()
 	}
 	logger.Info("start", "version", version, "minimized", minimized, "selftest", selfTest)
+	keepCrashOutput(paths, logger)
 
 	app := NewApp(paths, logger)
+	win := app.window.fit(workArea())
+	startState := options.Normal
+	if win.Maximised {
+		startState = options.Maximised
+	}
 	app.selfTest = selfTest
 	app.hidden = minimized
 	if !selfTest {
@@ -84,11 +99,12 @@ func main() {
 		single = nil // the CI may start it while nothing else runs; keep it independent
 	}
 	err = wails.Run(&options.App{
-		Title:     appName,
-		Width:     980,
-		Height:    700,
-		MinWidth:  420,
-		MinHeight: 480,
+		Title:            appName,
+		Width:            win.Width,
+		Height:           win.Height,
+		MinWidth:         minWidth,
+		MinHeight:        minHeight,
+		WindowStartState: startState,
 		// Must match --bg in style.css, or the window flashes white.
 		BackgroundColour:   &options.RGBA{R: 243, G: 245, B: 249, A: 255},
 		AssetServer:        &assetserver.Options{Assets: assets},
@@ -108,7 +124,7 @@ func main() {
 		logger.Error("window failed", "err", err)
 		showFatal("could not open its window", err)
 		stopTray()
-		os.Exit(1)
+		os.Exit(exitNoRestart)
 	}
 	stopTray()
 }
@@ -119,7 +135,7 @@ func main() {
 func windowMessages() *windows.Messages {
 	m := windows.DefaultMessages()
 	m.WebView2ProcessCrash = "The Windows web view (WebView2) stopped. " + appName + " itself did not crash, " +
-		"and your vault was not changed. Please start it again. If this keeps happening, repair the web view: " +
+		"and your vault was not changed. After OK it starts again by itself, in the tray. If this keeps happening, repair the web view: " +
 		"Settings > Apps > Installed apps > Microsoft Edge WebView2 Runtime > Modify > Repair."
 	return m
 }

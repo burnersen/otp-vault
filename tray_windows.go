@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -108,7 +109,10 @@ const (
 	cfUnicodeText = 13
 	gmemMoveable  = 0x0002
 
-	timerIcon = 1 // retries adding the icon (Explorer not ready at autostart)
+	timerIcon = 1 // adds the icon again whenever it is missing (see checkIcon)
+
+	iconRetry = 2000  // ms, while the icon is missing (Explorer not ready at autostart)
+	iconCheck = 30000 // ms, while it is there: Windows may drop it without a word
 
 	menuShow = 1
 	menuLock = 2
@@ -197,10 +201,7 @@ func runTray(h trayHooks) error {
 		h.logger.Warn("session notifications not available", "err", err)
 	}
 	t.icon = loadAppIcon()
-	t.addIcon()
-	if !t.iconAdded {
-		procSetTimer.Call(hwnd, timerIcon, 2000, 0)
-	}
+	t.checkIcon()
 
 	var m winMsg
 	for {
@@ -216,28 +217,36 @@ func runTray(h trayHooks) error {
 	}
 }
 
-func trayWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
+func trayWndProc(hwnd, msg, wParam, lParam uintptr) (result uintptr) {
 	t := theTray
 	if t == nil || hwnd != t.hwnd {
 		r, _, _ := procDefWindowProcW.Call(hwnd, msg, wParam, lParam)
 		return r
 	}
+	// A panic must not leave this callback: it would end the whole program
+	// and take the icon with it.
+	defer func() {
+		if p := recover(); p != nil {
+			t.hooks.logger.Error("tray: panic", "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
+			result = 0
+		}
+	}()
 	switch {
 	case msg == trayCallback:
 		switch lParam & 0xFFFF {
 		case wmLButtonUp:
-			go t.hooks.toggle()
+			t.run("toggle", t.hooks.toggle)
 		case wmRButtonUp, wmContextMenu:
 			t.showMenu()
 		}
 		return 0
 	case msg == wmWTSSessionChange:
 		if wParam == wtsSessionLock && t.hooks.sessionLocked() {
-			go t.hooks.lock()
+			t.run("lock", t.hooks.lock)
 		}
 		return 0
 	case msg == wmTimer && wParam == timerIcon:
-		t.addIcon()
+		t.checkIcon()
 		return 0
 	case msg == wmClose:
 		t.removeIcon()
@@ -249,11 +258,48 @@ func trayWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 		return 0
 	case t.taskbarCreated != 0 && msg == t.taskbarCreated:
 		t.iconAdded = false // Explorer restarted, every icon is gone
-		t.addIcon()
+		t.checkIcon()
 		return 0
 	}
 	r, _, _ := procDefWindowProcW.Call(hwnd, msg, wParam, lParam)
 	return r
+}
+
+// run calls a hook on its own goroutine. A panic there is logged instead of
+// ending the program (a panic in any goroutine ends a Go program).
+func (t *tray) run(name string, f func()) {
+	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				t.hooks.logger.Error("tray: panic in "+name, "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
+			}
+		}()
+		f()
+	}()
+}
+
+// checkIcon makes sure the icon is there: it adds a missing one and asks
+// Windows about one it thinks is there. Windows can drop an icon without
+// telling the program (Explorer hung, display or DPI change), and the
+// TaskbarCreated message may come before Explorer accepts icons again. The
+// timer then retries every 2 seconds until it works, later it checks every
+// 30 seconds.
+func (t *tray) checkIcon() {
+	if t.iconAdded {
+		nid := t.iconData()
+		nid.uFlags = nifTip
+		copyUTF16(nid.szTip[:], t.hooks.labels().Tooltip)
+		if r, _, _ := procShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&nid))); r == 0 {
+			t.hooks.logger.Warn("tray icon was gone, adding it again")
+			t.iconAdded = false
+		}
+	}
+	t.addIcon()
+	every := uintptr(iconCheck)
+	if !t.iconAdded {
+		every = iconRetry
+	}
+	procSetTimer.Call(t.hwnd, timerIcon, every, 0) // same id: replaces the previous interval
 }
 
 func loadAppIcon() uintptr {
@@ -287,6 +333,13 @@ func (t *tray) addIcon() {
 	if r, _, _ := procShellNotifyIconW.Call(nimAdd, uintptr(unsafe.Pointer(&nid))); r != 0 {
 		t.iconAdded = true
 		t.hooks.logger.Info("tray icon added")
+		return
+	}
+	// NIM_ADD can time out while Explorer is busy and still add the icon; a
+	// second add then fails because it exists. Modify tells the two apart.
+	if r, _, _ := procShellNotifyIconW.Call(nimModify, uintptr(unsafe.Pointer(&nid))); r != 0 {
+		t.iconAdded = true
+		t.hooks.logger.Info("tray icon was there already")
 	}
 }
 
@@ -323,11 +376,11 @@ func (t *tray) showMenu() {
 	procPostMessageW.Call(t.hwnd, wmNull, 0, 0)
 	switch cmd {
 	case menuShow:
-		go t.hooks.show()
+		t.run("show", t.hooks.show)
 	case menuLock:
-		go t.hooks.lock()
+		t.run("lock", t.hooks.lock)
 	case menuQuit:
-		go t.hooks.quit()
+		t.run("quit", t.hooks.quit)
 	}
 }
 

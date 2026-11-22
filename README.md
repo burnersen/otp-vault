@@ -47,7 +47,7 @@
 - **Import from almost anything**: a bare secret, `otpauth://` links (with or without issuer; missing names are asked for), Google Authenticator export QR codes, Aegis (plain and encrypted), 2FAS (plain and encrypted), andOTP, Bitwarden JSON and CSV, KeePassXC CSV, any CSV with a secret column, otp-vault backups. QR codes from image files or a pasted screenshot (Win+Shift+S, then Ctrl+V). Duplicates are recognised.
 - **Export in every direction**: encrypted backup (with the master password or its own), A4 recovery sheet (PDF) with QR code, service, user name and secret, QR codes for Google Authenticator, Aegis JSON, `otpauth://` links, CSV. Plain exports warn first.
 - **Icons**: on request, fetched from the service's own website and stored inside the vault. Or choose your own image.
-- **Tray**: the close button sends it to the tray; left click shows or hides the window, right click to lock or quit. Optional start with Windows.
+- **Tray**: the close button sends it to the tray; left click shows or hides the window, right click to lock or quit. Optional start with Windows. If it ever goes down (for example when the Windows web view crashes), it starts again by itself in the tray. The window opens in the size you left it.
 - **German and English**, light and dark like Windows.
 
 ## 🖼️ A look around
@@ -75,7 +75,8 @@ Light and dark follow Windows:
 |---|---|
 | Vault | `%LOCALAPPDATA%\otp-vault\vault.otpv` (and `vault.otpv.bak`) |
 | Settings | `%LOCALAPPDATA%\otp-vault\settings.json` |
-| Log | `%LOCALAPPDATA%\otp-vault\logs\otp-vault.log` |
+| Window size | `%LOCALAPPDATA%\otp-vault\window.json` |
+| Log | `%LOCALAPPDATA%\otp-vault\logs\otp-vault.log` (and `crash.log` if it ever crashed) |
 
 **Portable:** put an empty file `portable.txt` next to the exe, and everything stays in that folder (vault in `data\`). The log never grows past 2 MB and contains no secrets.
 

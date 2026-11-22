@@ -1236,6 +1236,16 @@
       importFiles(files);
     });
 
+    // The window remembers its size for the next start: Go reads it from
+    // Windows once the user stops dragging.
+    let resizeTimer = null;
+    if (root.addEventListener) {
+      root.addEventListener("resize", () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => { call("RememberWindow").catch(() => {}); }, 600);
+      });
+    }
+
     if (root.runtime && root.runtime.EventsOn) {
       root.runtime.EventsOn("locked", () => { if (state.unlocked) { onLocked(); } });
       root.runtime.EventsOn("icon", (v) => { replaceEntry(v); render(); });

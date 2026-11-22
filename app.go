@@ -48,7 +48,8 @@ type App struct {
 	pending      []Entry // import waiting for the user's choice
 	pendingFmt   string
 	clipTimer    *time.Timer
-	clipClear    func() // empties the clipboard if it still holds what was copied
+	clipClear    func()      // empties the clipboard if it still holds what was copied
+	window       windowState // last size of the window (window.json)
 	hidden       bool
 	quitting     bool
 	selfTest     bool
@@ -77,6 +78,7 @@ func NewApp(paths appPaths, logger *slog.Logger) *App {
 	if a.warning != "" {
 		logger.Warn(a.warning)
 	}
+	a.window = loadWindowState(filepath.Join(paths.DataDir, windowStateName))
 	a.lastActivity = a.now()
 	a.emit = func(name string, data ...any) {
 		if a.ctx != nil {
@@ -101,6 +103,7 @@ func (a *App) beforeClose(ctx context.Context) bool {
 	a.mu.Lock()
 	toTray := a.settings.CloseToTray && !a.quitting
 	a.mu.Unlock()
+	a.RememberWindow()
 	if toTray {
 		a.HideWindow()
 		return true
@@ -260,7 +263,11 @@ func (a *App) ShowWindow() {
 	a.hidden = false
 	a.mu.Unlock()
 	wailsruntime.WindowShow(a.ctx)
-	wailsruntime.WindowUnminimise(a.ctx)
+	// Only when minimised: Unminimise sends SC_RESTORE, which would also
+	// turn a maximised window back into a normal one.
+	if wailsruntime.WindowIsMinimised(a.ctx) {
+		wailsruntime.WindowUnminimise(a.ctx)
+	}
 	a.emit("shown")
 }
 
@@ -286,6 +293,36 @@ func (a *App) toggleWindow() {
 		a.ShowWindow()
 	} else {
 		a.HideWindow()
+	}
+}
+
+// RememberWindow keeps the window's size for the next start. The page calls
+// it after every resize; a hidden or minimised window says nothing useful,
+// a maximised one keeps its last normal size.
+func (a *App) RememberWindow() {
+	if a.ctx == nil {
+		return
+	}
+	a.mu.Lock()
+	hidden, ws := a.hidden, a.window
+	a.mu.Unlock()
+	if hidden || wailsruntime.WindowIsMinimised(a.ctx) {
+		return
+	}
+	ws.Maximised = wailsruntime.WindowIsMaximised(a.ctx)
+	if !ws.Maximised && !wailsruntime.WindowIsFullscreen(a.ctx) {
+		ws.Width, ws.Height = wailsruntime.WindowGetSize(a.ctx)
+	}
+	ws = ws.fit(0, 0)
+	a.mu.Lock()
+	changed := ws != a.window
+	a.window = ws
+	a.mu.Unlock()
+	if !changed {
+		return
+	}
+	if err := saveWindowState(filepath.Join(a.paths.DataDir, windowStateName), ws); err != nil {
+		a.logger.Warn("window size not saved", "err", err)
 	}
 }
 
