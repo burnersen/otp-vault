@@ -32,6 +32,8 @@
 
 ---
 
+> ⚠️ **Before you start:** otp-vault is free hobby software without any warranty, and you use it at your own risk. Keep an independent backup of your two-factor secrets and the recovery codes of your accounts: a lost master password cannot be recovered. Details in the disclaimer at the end.
+
 ## ⚡ 30 seconds, no manual
 
 1. Download `otp-vault.exe` from the latest release and start it.
@@ -64,7 +66,7 @@ Light and dark follow Windows:
 
 - The vault is one file, encrypted with **XChaCha20-Poly1305**; the key comes from your master password with **Argon2id** (64 MiB, 3 passes). Without the password nothing is readable, not even the names of the accounts.
 - **Auto lock** after 5 minutes without use (adjustable), when Windows is locked (Win+L), and optionally when the window goes to the tray.
-- Every change is saved at once; the previous file is kept as `vault.otpv.bak`. After a password change the backup is replaced too, so no file opens with the old password any more.
+- Every change is saved at once; the previous file is kept as `vault.otpv.bak`. That is a safety net, not a backup: keep an encrypted export somewhere else too. After a password change the backup is replaced too, so no file opens with the old password any more.
 - **No network**, except when you click "Fetch icons": then only the host name of the service is contacted, never a secret or a user name. No icon service in between.
 
 ## 📁 Where its files live
@@ -98,6 +100,14 @@ wails build -platform windows/amd64 -skipbindings -trimpath
 ## ☕ Support
 
 otp-vault is free and made in my spare time, on my own hardware and electricity bill. If it saved you time and you'd like to say thanks, you can [drop a little something in the tip jar on Ko-fi](https://ko-fi.com/burnersen), it keeps motivation and coffee flowing. ☕ Completely optional, and either way: thank you for using it!
+
+## ⚠️ Disclaimer
+
+otp-vault is free hobby software, provided **"as is", without any warranty or condition of any kind**. It was built and tested with care, but you use it **at your own risk**. Keep an independent backup of your two-factor secrets (an encrypted export or the printed recovery sheet) and the recovery codes of your accounts: a lost master password cannot be recovered by anyone.
+
+Where this README describes what otp-vault does, checks or never does, that is how it is designed to work, not a promise or guarantee: software can have bugs, and systems, services and other programs do not always behave as expected. As far as the applicable law allows, the author is not liable for any damages or data loss arising from the use of this software. See sections 15 and 16 of the [license](LICENSE).
+
+---
 
 ---
 
